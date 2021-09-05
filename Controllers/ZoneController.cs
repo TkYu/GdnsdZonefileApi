@@ -76,6 +76,18 @@ namespace GdnsdZonefileApi.Controllers
             });
         }
 
+        [HttpGet("{zone}/nextid")]
+        public async Task<IActionResult> GetNextSerialNumberAsync(string zone)
+        {
+            if (HttpContext.Request.Headers["X-Auth-Key"] != _configuration["Key"]) return Unauthorized();
+            var zoneFile = Path.Combine(_configuration["ZoneFolder"], zone);
+            if (!System.IO.File.Exists(zoneFile)) return NotFound();
+            var zoneFileContent = await System.IO.File.ReadAllTextAsync(zoneFile);
+            var match = regexZoneFile.Match(zoneFileContent);
+            if (!match.Success) return NotFound();
+            return Ok(uint.Parse(match.Groups["serial"].Value)+1);
+        }
+
         [HttpGet("{zone}/record")]
         public async Task<IActionResult> GetRecordAsync(string zone)
         {
