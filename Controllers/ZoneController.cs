@@ -121,13 +121,13 @@ namespace GdnsdZonefileApi.Controllers
                 if (Record.TryParse(line, out var rec)) lst.Add(rec);
             if (lst.Any(c => c.HostLabel == record.HostLabel && c.RecordType == record.RecordType && c.RecordData == record.RecordData))
             {
-                var newContent = Regex.Replace(zoneFileContent, $@"^{record.HostLabel}\s+[\d/]{{0,10}}{record.RecordType:G}\s+{record.RecordData}$", record.ToString(), RegexOptions.Multiline);
+                var newContent = Regex.Replace(zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString()), $@"{record.HostLabel}\s+[\d/]{{0,10}}\s+{record.RecordType:G}\s+{record.RecordData}\n", record.ToString());
                 if (zoneFileContent == newContent) return StatusCode(304);
                 await System.IO.File.WriteAllTextAsync(stageFile, newContent);
             }
             else
             {
-                await System.IO.File.WriteAllTextAsync(stageFile, $"{zoneFileContent}\n{record}");
+                await System.IO.File.WriteAllTextAsync(stageFile, $"{zoneFileContent}{record}\n");
             }
             return NoContent();
         }
@@ -149,7 +149,7 @@ namespace GdnsdZonefileApi.Controllers
                 if (Record.TryParse(line, out var rec)) lst.Add(rec);
             if (lst.Any(c => c.HostLabel == record.HostLabel && c.RecordType == record.RecordType && c.RecordData == record.RecordData))
             {
-                var newContent = Regex.Replace(zoneFileContent, $@"^{record.HostLabel}\s+[\d/]{{0,10}}{record.RecordType:G}\s+{record.RecordData}$", "", RegexOptions.Multiline);
+                var newContent = Regex.Replace(zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString()), $@"{record.HostLabel}\s+[\d/]{{0,10}}\s+{record.RecordType:G}\s+{record.RecordData}\n", "");
                 if (zoneFileContent == newContent) return StatusCode(304);
                 await System.IO.File.WriteAllTextAsync(stageFile, newContent);
                 return NoContent();
@@ -157,7 +157,7 @@ namespace GdnsdZonefileApi.Controllers
             return StatusCode(304);
         }
 
-        [HttpPatch("{zone}/record/{serial}")]
+        [HttpPost("{zone}/record/submit/{serial}")]
         public async Task<IActionResult> CommitAsync(string zone, string serial)
         {
             if (HttpContext.Request.Headers["X-Auth-Key"] != _configuration["Key"]) return Unauthorized();
