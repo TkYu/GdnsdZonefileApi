@@ -110,7 +110,7 @@ namespace GdnsdZonefileApi.Controllers
 
 
         [HttpPost("{zone}/record")]
-        public async Task<IActionResult> AddOrUpdateRecordAsync(string zone,[FromBody]Record record)
+        public async Task<IActionResult> AddOrUpdateRecordAsync(string zone,[FromBody]Record record, [FromQuery] string submit = null)
         {
             if (HttpContext.Request.Headers["X-Auth-Key"] != _configuration["Key"]) return Unauthorized();
             if (record.Serial == null) return BadRequest();
@@ -124,21 +124,29 @@ namespace GdnsdZonefileApi.Controllers
             var lst = new List<Record>();
             foreach (var line in lines)
                 if (Record.TryParse(line, out var rec)) lst.Add(rec);
+            string newContent;
             if (lst.Any(c => c.HostLabel == record.HostLabel && c.RecordType == record.RecordType && c.RecordData == record.RecordData))
             {
-                var newContent = Regex.Replace(zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString()), $@"{record.HostLabel}\s+[\d/]{{0,10}}\s+{record.RecordType:G}\s+{record.RecordData}", record.ToString());
+                newContent = Regex.Replace(zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString()), $@"{record.HostLabel}\s+[\d/]{{0,10}}\s+{record.RecordType:G}\s+{record.RecordData}", record.ToString());
                 if (zoneFileContent == newContent) return StatusCode(304);
-                await System.IO.File.WriteAllTextAsync(stageFile, newContent);
             }
             else
             {
-                await System.IO.File.WriteAllTextAsync(stageFile, $"{zoneFileContent}{record}\n");
+                newContent = $"{zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString())}{record}\n";
             }
-            return NoContent();
+
+            if (string.IsNullOrEmpty(submit))
+            {
+                await System.IO.File.WriteAllTextAsync(stageFile, newContent);
+                return NoContent();
+            }
+
+            var save = await SaveAndReloadAsync(zoneFile, newContent);
+            return save == null ? StatusCode(500) : Ok(save);
         }
 
         [HttpPost("{zone}/record/delete")]
-        public async Task<IActionResult> DeleteRecordAsync(string zone, [FromBody] Record record)
+        public async Task<IActionResult> DeleteRecordAsync(string zone, [FromBody] Record record,[FromQuery] string submit = null)
         {
             if (HttpContext.Request.Headers["X-Auth-Key"] != _configuration["Key"]) return Unauthorized();
             if (record.Serial == null) return BadRequest();
@@ -156,8 +164,13 @@ namespace GdnsdZonefileApi.Controllers
             {
                 var newContent = Regex.Replace(zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString()), $@"{record.HostLabel}\s+[\d/]{{0,10}}\s+{record.RecordType:G}\s+{record.RecordData}\n", "");
                 if (zoneFileContent == newContent) return StatusCode(304);
-                await System.IO.File.WriteAllTextAsync(stageFile, newContent);
-                return NoContent();
+                if (string.IsNullOrEmpty(submit))
+                {
+                    await System.IO.File.WriteAllTextAsync(stageFile, newContent);
+                    return NoContent();
+                }
+                var save = await SaveAndReloadAsync(zoneFile, newContent);
+                return save == null ? StatusCode(500) : Ok(save);
             }
             return StatusCode(304);
         }
@@ -183,6 +196,25 @@ namespace GdnsdZonefileApi.Controllers
             System.IO.File.Delete(zoneFile);
             await System.IO.File.WriteAllTextAsync(zoneFile, oldContent);
             return StatusCode(500);
+        }
+
+        private async Task<string> SaveAndReloadAsync(string zoneFile,string newContent)
+        {
+            var oldContent = await System.IO.File.ReadAllTextAsync(zoneFile);
+            System.IO.File.Delete(zoneFile);
+            await System.IO.File.WriteAllTextAsync(zoneFile, newContent);
+            try
+            {
+                if (RunCommand(_configuration["CheckCommand"], out var testResult) == 0 && RunCommand(_configuration["ReloadCommand"], out var reloadResult) == 0) return $"{testResult}{reloadResult}";
+            }
+            catch (Exception e)
+            {
+                //ignore
+                Console.WriteLine(e);
+            }
+            System.IO.File.Delete(zoneFile);
+            await System.IO.File.WriteAllTextAsync(zoneFile, oldContent);
+            return null;
         }
 
         private int RunCommand(string command, out string result)
