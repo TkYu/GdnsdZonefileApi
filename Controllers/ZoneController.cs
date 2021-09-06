@@ -89,7 +89,7 @@ namespace GdnsdZonefileApi.Controllers
         }
 
         [HttpGet("{zone}/record")]
-        public async Task<IActionResult> GetRecordAsync(string zone)
+        public async Task<IActionResult> GetRecordAsync(string zone,[FromQuery] string type = null,[FromQuery] string label = null)
         {
             if (HttpContext.Request.Headers["X-Auth-Key"] != _configuration["Key"]) return Unauthorized();
             var lst = new List<Record>();
@@ -101,8 +101,13 @@ namespace GdnsdZonefileApi.Controllers
             var lines = match.Groups["content"].Value.Split('\n').Where(v => !string.IsNullOrWhiteSpace(v)).ToArray();
             foreach (var record in lines)
                 if (Record.TryParse(record, out var rec)) lst.Add(rec);
+            if (type != null && Enum.TryParse<RecordType>(type, out var pType))
+                lst = lst.Where(c => c.RecordType == pType).ToList();
+            if (label != null && lst.Any(c=>c.HostLabel == label))
+                lst = lst.Where(c => c.HostLabel == label).ToList();
             return Ok(lst);
         }
+
 
         [HttpPost("{zone}/record")]
         public async Task<IActionResult> AddOrUpdateRecordAsync(string zone,[FromBody]Record record)
@@ -121,7 +126,7 @@ namespace GdnsdZonefileApi.Controllers
                 if (Record.TryParse(line, out var rec)) lst.Add(rec);
             if (lst.Any(c => c.HostLabel == record.HostLabel && c.RecordType == record.RecordType && c.RecordData == record.RecordData))
             {
-                var newContent = Regex.Replace(zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString()), $@"{record.HostLabel}\s+[\d/]{{0,10}}\s+{record.RecordType:G}\s+{record.RecordData}\n", record.ToString());
+                var newContent = Regex.Replace(zoneFileContent.Remove(match.Groups["serial"].Index, match.Groups["serial"].Length).Insert(match.Groups["serial"].Index, record.Serial.Value.ToString()), $@"{record.HostLabel}\s+[\d/]{{0,10}}\s+{record.RecordType:G}\s+{record.RecordData}", record.ToString());
                 if (zoneFileContent == newContent) return StatusCode(304);
                 await System.IO.File.WriteAllTextAsync(stageFile, newContent);
             }
